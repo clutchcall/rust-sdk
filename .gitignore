@@ -1,0 +1,15 @@
+# Bazel
+/bazel-*
+bazel-bin/
+bazel-out/
+bazel-testlogs/
+
+# OS / editor
+.DS_Store
+*.swp
+.vscode/
+.idea/
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock

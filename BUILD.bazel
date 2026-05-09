@@ -1,0 +1,14 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "clutchcall_rust",
+    srcs = glob(["src/*.rs"]),
+    data = ["//core:clutchcall_core_ffi.so"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates//:libloading",
+        "@crates//:quinn",
+        "@crates//:tokio",
+        "@crates//:uuid",
+    ],
+)
