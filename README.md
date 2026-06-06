@@ -1,7 +1,18 @@
 # ClutchCall Rust SDK
 
-Idiomatic Rust client for ClutchCall — telephony origination, media streaming,
-and zero-trust JWT auth, built on Tokio + Quinn (QUIC).
+The official Rust crate for ClutchCall. **Modality-oriented**: each modality
+is its own module, all riding the same MoQT substrate underneath. Mix as
+needed in one binary.
+
+| Module                  | Modality                                            | Status |
+| ----------------------- | --------------------------------------------------- | ------ |
+| `clutchcall_sdk::streams`  | Live broadcasts + signed playback URLs           | **GA** |
+| `clutchcall_sdk::robotics` | Robotics topic pub/sub (ROS 2 CDR)               | **GA** |
+| `clutchcall_sdk::games`    | Games (rooms, state/input/event channels)        | **GA** |
+| `clutchcall_sdk::data`     | MQTT-style typed pub/sub (`+` / `#` filters)     | **GA** |
+| `clutchcall_sdk::voice`    | Voice (calls + bidirectional audio bridge)       | **GA** |
+| `clutchcall_sdk::moqt`     | Realtime tracks (audio/video/frame)              | GA     |
+| `clutchcall_sdk::client`   | Legacy voice surface (`ClutchCallClient`) — kept for backwards compat | legacy |
 
 ## Add to your project
 
@@ -11,7 +22,76 @@ clutchcall-sdk = "1.0"
 tokio          = { version = "1", features = ["full"] }
 ```
 
-## Quick start
+## Streams — watch a live broadcast
+
+```rust
+use clutchcall_sdk::streams::{Streams, BroadcastViewer};
+
+let s   = Streams::new("https://app.clutchcall.dev", &api_key, "org_abc")?;
+let inp = s.live_inputs().get("li_xyz")?;
+let t   = inp.signed_playback_url(3600)?;
+
+let viewer = BroadcastViewer::open(&t.url,
+    Box::new(|is_init, chunk| { /* feed chunk.data to MSE / file */ }),
+    None)?;
+```
+
+## Robotics — telemetry + commands
+
+```rust
+use clutchcall_sdk::robotics::{Robotics, QoSProfile, Reliability};
+
+let mut r = Robotics::new(&token, "turtlebot-7")?;
+let odom = r.publish_telemetry("odom", "nav_msgs/msg/Odometry",
+    QoSProfile { reliability: Reliability::Reliable, ..Default::default() })?;
+odom.write(&cdr_bytes)?;
+```
+
+## Games — multiplayer rooms
+
+```rust
+use clutchcall_sdk::games::Games;
+
+// Authoritative server (None player_id)
+let mut auth = Games::new(&token, "duel-42", None)?;
+let state = auth.publish_state(Some(30))?;
+let _sub  = auth.subscribe_inputs(|pid, bytes| { /* apply */ })?;
+```
+
+## Data — MQTT-style pub/sub
+
+```rust
+use clutchcall_sdk::data::Data;
+
+let mut d = Data::new(&token, "device-7")?;
+d.publish("sensors/room1/temperature", b"23.5", false, false)?;
+let _sub = d.subscribe("sensors/+/temperature", |m| {
+    println!("{} ← {}: {:?}", m.topic, m.from_client_id, m.payload);
+})?;
+```
+
+## Voice — calls + audio bridge
+
+```rust
+use clutchcall_sdk::voice::{Voice, OriginateArgs, AudioBridgeOpts, Codec};
+
+let v    = Voice::new("https://app.clutchcall.dev", &api_key, "org_abc")?;
+let call = v.calls().originate(OriginateArgs {
+    to: "+15551234567", from: "+15558675309",
+    trunk_id: "trunk_main", agent: Some("healthcare-assistant"),
+    ..Default::default()
+})?;
+
+let bridge = v.audio_bridge().attach(&call.data.sid,
+    AudioBridgeOpts { codec: Codec::Opus, ..Default::default() },
+    |frame, ts_us| { asr.feed(frame); })?;
+// … later
+call.hangup()?;
+```
+
+### Legacy voice surface
+
+The original `ClutchCallClient` (at the root) is kept for backwards compat:
 
 ```rust
 use clutchcall_sdk::ClutchCallClient;
