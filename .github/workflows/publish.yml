@@ -19,15 +19,17 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - run: |
           cargo package --allow-dirty --no-verify
-          C=clutchcall-sdk; V=1.0.0; CK=$(sha256sum target/package/$C-$V.crate|cut -d' ' -f1)
-          python3 - "$CK" <<'PY'
+          C=clutchcall-sdk
+          V=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(json.load(sys.stdin)["packages"][0]["version"])')
+          CK=$(sha256sum target/package/$C-$V.crate | cut -d' ' -f1)
+          python3 - "$CK" "$V" <<'PY'
           import json,subprocess,sys
-          ck=sys.argv[1]; CIO="https://github.com/rust-lang/crates.io-index"
+          ck,ver=sys.argv[1],sys.argv[2]; CIO="https://github.com/rust-lang/crates.io-index"
           p=json.loads(subprocess.check_output(["cargo","metadata","--no-deps","--format-version","1"]))["packages"][0]
           deps=[{"name":d["name"],"req":d["req"],"features":d.get("features",[]),"optional":d.get("optional",False),"default_features":d.get("uses_default_features",True),"target":d.get("target"),"kind":d.get("kind") or "normal","registry":CIO} for d in p["dependencies"]]
-          open("/tmp/cidx","w").write(json.dumps({"name":p["name"],"vers":p["version"],"deps":deps,"cksum":ck,"features":p.get("features",{}),"yanked":False,"links":None}))
+          open("/tmp/cidx","w").write(json.dumps({"name":p["name"],"vers":ver,"deps":deps,"cksum":ck,"features":p.get("features",{}),"yanked":False,"links":None}))
           PY
-          rm -rf /tmp/cr; mkdir -p /tmp/cr/cl/ut /tmp/cr/crates/$C/$V
-          echo '{"dl":"https://artifacts.clutchcall.dev/cargo/crates/{crate}/{version}/{crate}-{version}.crate","api":"https://artifacts.clutchcall.dev/cargo"}' > /tmp/cr/config.json
-          cp /tmp/cidx /tmp/cr/cl/ut/$C; cp target/package/$C-$V.crate /tmp/cr/crates/$C/$V/$C-$V.crate
-          gcloud storage rsync -r /tmp/cr gs://clutchcall-packages/cargo
+          B=gs://clutchcall-packages/cargo
+          echo '{"dl":"https://artifacts.clutchcall.dev/cargo/crates/{crate}/{version}/{crate}-{version}.crate","api":"https://artifacts.clutchcall.dev/cargo"}' | gcloud storage cp - "$B/config.json"
+          gcloud storage cp target/package/$C-$V.crate "$B/crates/$C/$V/$C-$V.crate"
+          { curl -fsSL https://artifacts.clutchcall.dev/cargo/cl/ut/$C 2>/dev/null | grep -v "\"vers\":\"$V\"" || true; cat /tmp/cidx; } | grep -vE '^$' | gcloud storage cp - "$B/cl/ut/$C"
