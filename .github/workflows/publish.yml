@@ -1,0 +1,33 @@
+name: publish
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/875189167966/locations/global/workloadIdentityPools/github/providers/clutchcall
+          service_account: gh-publish@technomers-internal.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: |
+          cargo package --allow-dirty --no-verify
+          C=clutchcall-sdk; V=1.0.0; CK=$(sha256sum target/package/$C-$V.crate|cut -d' ' -f1)
+          python3 - "$CK" <<'PY'
+          import json,subprocess,sys
+          ck=sys.argv[1]; CIO="https://github.com/rust-lang/crates.io-index"
+          p=json.loads(subprocess.check_output(["cargo","metadata","--no-deps","--format-version","1"]))["packages"][0]
+          deps=[{"name":d["name"],"req":d["req"],"features":d.get("features",[]),"optional":d.get("optional",False),"default_features":d.get("uses_default_features",True),"target":d.get("target"),"kind":d.get("kind") or "normal","registry":CIO} for d in p["dependencies"]]
+          open("/tmp/cidx","w").write(json.dumps({"name":p["name"],"vers":p["version"],"deps":deps,"cksum":ck,"features":p.get("features",{}),"yanked":False,"links":None}))
+          PY
+          rm -rf /tmp/cr; mkdir -p /tmp/cr/cl/ut /tmp/cr/crates/$C/$V
+          echo '{"dl":"https://artifacts.clutchcall.dev/cargo/crates/{crate}/{version}/{crate}-{version}.crate","api":"https://artifacts.clutchcall.dev/cargo"}' > /tmp/cr/config.json
+          cp /tmp/cidx /tmp/cr/cl/ut/$C; cp target/package/$C-$V.crate /tmp/cr/crates/$C/$V/$C-$V.crate
+          gcloud storage rsync -r /tmp/cr gs://clutchcall-packages/cargo
